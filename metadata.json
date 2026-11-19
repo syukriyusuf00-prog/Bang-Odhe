@@ -1,0 +1,8 @@
+{
+  "name": "GiziSync — Platform Digital Layanan Gizi",
+  "description": "Portal landing page resmi GiziSync untuk akses aplikasi SISPERMBG, Status Gizi, dan SOP SISTAKOL BGN dilengkapi editor foto presisi, deteksi pengunjung real-time, serta rating dan ulasan pengguna.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

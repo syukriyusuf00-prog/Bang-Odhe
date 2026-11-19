@@ -1,0 +1,332 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Deny all access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Reusable Hardened Global Primitives
+    // -------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'syukriyusuf00@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidSiteMetrics(data) {
+      return data.keys().hasAll([
+          'totalVisits',
+          'sispermbgClicks',
+          'statusGiziClicks',
+          'sopSistakolClicks',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'totalVisits',
+          'sispermbgClicks',
+          'statusGiziClicks',
+          'sopSistakolClicks',
+          'giziSeimbangClicks',
+          'updatedAt'
+        ]) &&
+        data.totalVisits is int && data.totalVisits >= 0 && data.totalVisits <= 100000000 &&
+        data.sispermbgClicks is int && data.sispermbgClicks >= 0 && data.sispermbgClicks <= 100000000 &&
+        data.statusGiziClicks is int && data.statusGiziClicks >= 0 && data.statusGiziClicks <= 100000000 &&
+        data.sopSistakolClicks is int && data.sopSistakolClicks >= 0 && data.sopSistakolClicks <= 100000000 &&
+        (!('giziSeimbangClicks' in data) || (
+          data.giziSeimbangClicks is int &&
+          data.giziSeimbangClicks >= 0 &&
+          data.giziSeimbangClicks <= 100000000
+        )) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll([
+          'authorName',
+          'authorRole',
+          'appTarget',
+          'rating',
+          'comment',
+          'status',
+          'authorUid',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'authorName',
+          'authorRole',
+          'appTarget',
+          'rating',
+          'comment',
+          'status',
+          'authorUid',
+          'createdAt'
+        ]) &&
+        data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 60 &&
+        data.authorRole is string && data.authorRole.size() <= 80 &&
+        data.appTarget in [
+          'Umum',
+          'SISPERMBG',
+          'Status Gizi',
+          'SOP SISTAKOL BGN',
+          'Aplikasi Gizi Seimbang'
+        ] &&
+        data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+        data.comment is string && data.comment.size() >= 3 && data.comment.size() <= 600 &&
+        data.status in ['published', 'hidden'] &&
+        data.authorUid is string && data.authorUid.size() <= 128 &&
+        (data.authorUid == '' || data.authorUid.matches('^[a-zA-Z0-9_\\-]+$')) &&
+        data.createdAt is timestamp;
+    }
+
+    function isSafeImageDataUrl(url) {
+      return url is string &&
+        url.size() >= 30 &&
+        url.size() <= 350000 && (
+          url[0:23] == 'data:image/jpeg;base64,' ||
+          url[0:22] == 'data:image/png;base64,' ||
+          url[0:23] == 'data:image/webp;base64,'
+        );
+    }
+
+    function isValidMediaSlot(data, slotId) {
+      return data.keys().hasAll([
+          'slotId',
+          'imageDataUrl',
+          'zoom',
+          'offsetX',
+          'offsetY',
+          'rotation',
+          'aspectRatio',
+          'updatedBy',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'slotId',
+          'imageDataUrl',
+          'zoom',
+          'offsetX',
+          'offsetY',
+          'rotation',
+          'aspectRatio',
+          'updatedBy',
+          'updatedAt'
+        ]) &&
+        data.slotId in [
+          'hero_portrait',
+          'app_sispermbg',
+          'app_status_gizi',
+          'app_sop_sistakol',
+          'app_gizi_seimbang'
+        ] &&
+        data.slotId == slotId &&
+        isSafeImageDataUrl(data.imageDataUrl) &&
+        (data.zoom is int || data.zoom is float) && data.zoom >= 0.5 && data.zoom <= 3.0 &&
+        (data.offsetX is int || data.offsetX is float) && data.offsetX >= -100 && data.offsetX <= 100 &&
+        (data.offsetY is int || data.offsetY is float) && data.offsetY >= -100 && data.offsetY <= 100 &&
+        data.rotation is int && data.rotation in [0, 90, 180, 270] &&
+        data.aspectRatio in ['16:9', '4:3', '1:1', '4:5', '3:2', 'free'] &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
+        data.updatedBy.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.updatedAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 1: /site_metrics/{metricId}
+    // Public visitor & click counter singleton ('visitors')
+    // -------------------------------------------------------------------------
+    match /site_metrics/{metricId} {
+      allow get: if isValidId(metricId) && metricId == 'visitors';
+      allow list: if false;
+
+      allow create: if isValidId(metricId) &&
+        metricId == 'visitors' &&
+        isValidSiteMetrics(incoming()) &&
+        incoming().totalVisits == 1 &&
+        incoming().sispermbgClicks == 0 &&
+        incoming().statusGiziClicks == 0 &&
+        incoming().sopSistakolClicks == 0 &&
+        (!('giziSeimbangClicks' in incoming()) || incoming().giziSeimbangClicks == 0) &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(metricId) &&
+        metricId == 'visitors' &&
+        isValidSiteMetrics(incoming()) &&
+        incoming().updatedAt == request.time && (
+          // Action: Record single visitor entry (+1 strictly)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'updatedAt']) &&
+            incoming().totalVisits == existing().totalVisits + 1
+          ) ||
+          // Action: Record single click on SISPERMBG (+1 strictly)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['sispermbgClicks', 'updatedAt']) &&
+            incoming().sispermbgClicks == existing().sispermbgClicks + 1
+          ) ||
+          // Action: Record single click on Status Gizi (+1 strictly)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['statusGiziClicks', 'updatedAt']) &&
+            incoming().statusGiziClicks == existing().statusGiziClicks + 1
+          ) ||
+          // Action: Record single click on SOP SISTAKOL BGN (+1 strictly)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['sopSistakolClicks', 'updatedAt']) &&
+            incoming().sopSistakolClicks == existing().sopSistakolClicks + 1
+          ) ||
+          // Action: Record single click on Aplikasi Gizi Seimbang (+1 strictly, backward-compatible)
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['giziSeimbangClicks', 'updatedAt']) &&
+            (
+              ('giziSeimbangClicks' in existing() && incoming().giziSeimbangClicks == existing().giziSeimbangClicks + 1) ||
+              (!('giziSeimbangClicks' in existing()) && incoming().giziSeimbangClicks == 1)
+            )
+          ) ||
+          // Action: Admin correction
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'totalVisits',
+              'sispermbgClicks',
+              'statusGiziClicks',
+              'sopSistakolClicks',
+              'giziSeimbangClicks',
+              'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 2: /reviews/{reviewId}
+    // Public visitor ratings and comments visible to all landing page visitors
+    // -------------------------------------------------------------------------
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId) && (
+        existing().status == 'published' ||
+        isAdmin()
+      );
+
+      // Zero DB lookups inside list (cost-optimization invariant)
+      allow list: if resource.data.status == 'published' || isBootstrappedAdmin();
+
+      allow create: if isValidId(reviewId) &&
+        isValidReview(incoming()) &&
+        incoming().status == 'published' &&
+        incoming().createdAt == request.time && (
+          incoming().authorUid == '' ||
+          (isVerifiedUser() && incoming().authorUid == request.auth.uid)
+        );
+
+      allow update: if isVerifiedUser() &&
+        isValidId(reviewId) &&
+        isValidReview(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().authorUid == existing().authorUid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+        isAdmin();
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(reviewId) && (
+          (existing().authorUid != '' && existing().authorUid == request.auth.uid) ||
+          isAdmin()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 3: /media_slots/{slotId}
+    // Published custom cropped photos for hero portrait and 4 app cards
+    // -------------------------------------------------------------------------
+    match /media_slots/{slotId} {
+      allow get: if isValidId(slotId) &&
+        slotId in [
+          'hero_portrait',
+          'app_sispermbg',
+          'app_status_gizi',
+          'app_sop_sistakol',
+          'app_gizi_seimbang'
+        ];
+
+      // List not needed; client fetches the 5 fixed singleton slot IDs directly
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(slotId) &&
+        isValidMediaSlot(incoming(), slotId) &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() &&
+        isValidId(slotId) &&
+        isValidMediaSlot(incoming(), slotId) &&
+        incoming().slotId == existing().slotId &&
+        incoming().updatedBy == request.auth.uid &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'imageDataUrl',
+          'zoom',
+          'offsetX',
+          'offsetY',
+          'rotation',
+          'aspectRatio',
+          'updatedBy',
+          'updatedAt'
+        ]) &&
+        isAdmin();
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(slotId) &&
+        slotId in [
+          'hero_portrait',
+          'app_sispermbg',
+          'app_status_gizi',
+          'app_sop_sistakol',
+          'app_gizi_seimbang'
+        ] &&
+        isAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection 4: /admins/{uid}
+    // RBAC lookup table — strictly locked against client writes & scraping
+    // -------------------------------------------------------------------------
+    match /admins/{uid} {
+      allow get: if isVerifiedUser() && isValidId(uid) && request.auth.uid == uid;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+  }
+}

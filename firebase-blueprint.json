@@ -1,0 +1,212 @@
+{
+  "entities": {
+    "SiteMetrics": {
+      "title": "SiteMetrics",
+      "description": "Real-time landing page visitor counter and application click telemetry.",
+      "type": "object",
+      "properties": {
+        "totalVisits": {
+          "type": "integer",
+          "description": "Cumulative count of visitor sessions arriving on the landing page."
+        },
+        "sispermbgClicks": {
+          "type": "integer",
+          "description": "Cumulative clicks on the SISPERMBG application link."
+        },
+        "statusGiziClicks": {
+          "type": "integer",
+          "description": "Cumulative clicks on the Status Gizi application link."
+        },
+        "sopSistakolClicks": {
+          "type": "integer",
+          "description": "Cumulative clicks on the SOP SISTAKOL BGN application link."
+        },
+        "giziSeimbangClicks": {
+          "type": "integer",
+          "description": "Cumulative clicks on the Aplikasi Gizi Seimbang link."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last recorded visit or click."
+        }
+      },
+      "required": [
+        "totalVisits",
+        "sispermbgClicks",
+        "statusGiziClicks",
+        "sopSistakolClicks",
+        "updatedAt"
+      ]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Public rating and feedback submitted by landing page visitors.",
+      "type": "object",
+      "properties": {
+        "authorName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60,
+          "description": "Display name of the visitor leaving feedback."
+        },
+        "authorRole": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80,
+          "description": "Optional profession or organization of the visitor."
+        },
+        "appTarget": {
+          "type": "string",
+          "enum": [
+            "Umum",
+            "SISPERMBG",
+            "Status Gizi",
+            "SOP SISTAKOL BGN",
+            "Aplikasi Gizi Seimbang"
+          ],
+          "description": "Application or portal scope being reviewed."
+        },
+        "rating": {
+          "type": "integer",
+          "description": "Star rating from 1 to 5."
+        },
+        "comment": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 600,
+          "description": "Visitor comment or feedback message."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["published", "hidden"],
+          "description": "Moderation visibility status."
+        },
+        "authorUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^(|[a-zA-Z0-9_\\-]+)$",
+          "description": "Authenticated user UID if signed in, or empty string for guest visitors."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the review was created."
+        }
+      },
+      "required": [
+        "authorName",
+        "authorRole",
+        "appTarget",
+        "rating",
+        "comment",
+        "status",
+        "authorUid",
+        "createdAt"
+      ]
+    },
+    "MediaSlot": {
+      "title": "MediaSlot",
+      "description": "Precision cropped image and framing metadata for the hero portrait or an application card.",
+      "type": "object",
+      "properties": {
+        "slotId": {
+          "type": "string",
+          "enum": [
+            "hero_portrait",
+            "app_sispermbg",
+            "app_status_gizi",
+            "app_sop_sistakol",
+            "app_gizi_seimbang"
+          ],
+          "description": "Identifier matching the document ID of the media slot."
+        },
+        "imageDataUrl": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 350000,
+          "description": "Compact cropped image encoded as JPEG/WebP data URI."
+        },
+        "zoom": {
+          "type": "number",
+          "description": "Zoom factor applied during precision editing (0.5 to 3.0)."
+        },
+        "offsetX": {
+          "type": "number",
+          "description": "Horizontal pan offset percentage (-100 to 100)."
+        },
+        "offsetY": {
+          "type": "number",
+          "description": "Vertical pan offset percentage (-100 to 100)."
+        },
+        "rotation": {
+          "type": "integer",
+          "description": "Rotation in degrees (0, 90, 180, 270)."
+        },
+        "aspectRatio": {
+          "type": "string",
+          "enum": ["16:9", "4:3", "1:1", "4:5", "3:2", "free"],
+          "description": "Selected crop aspect preset."
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the verified admin who published this image."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last photo update."
+        }
+      },
+      "required": [
+        "slotId",
+        "imageDataUrl",
+        "zoom",
+        "offsetX",
+        "offsetY",
+        "rotation",
+        "aspectRatio",
+        "updatedBy",
+        "updatedAt"
+      ]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Server-managed administrator role record keyed by user UID.",
+      "type": "object",
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Assigned administrative role."
+        },
+        "grantedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when admin privilege was granted."
+        }
+      },
+      "required": ["role", "grantedAt"]
+    }
+  },
+  "firestore": {
+    "/site_metrics/{metricId}": {
+      "schema": { "$ref": "#/entities/SiteMetrics" },
+      "description": "Singleton counter document at /site_metrics/visitors tracking page visits and app clicks."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Public ratings and comments displayed to all visitors on the GiziSync landing page."
+    },
+    "/media_slots/{slotId}": {
+      "schema": { "$ref": "#/entities/MediaSlot" },
+      "description": "Published custom cropped photos for the hero portrait and the four application cards."
+    },
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminRole" },
+      "description": "RBAC lookup collection for elevated administrators."
+    }
+  }
+}
