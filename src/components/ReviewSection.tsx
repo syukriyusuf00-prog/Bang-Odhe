@@ -188,7 +188,7 @@ export function ReviewSection({
   return (
     <section
       id="ulasan"
-      className="py-20 sm:py-24 border-t border-slate-200 bg-[#F7FAFC]"
+      className="py-20 sm:py-24 bg-white animate-fade-in fade-delay-300"
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section Heading */}

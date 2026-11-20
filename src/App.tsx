@@ -4,6 +4,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   increment,
   limit,
   onSnapshot,
@@ -54,7 +55,6 @@ import {
   saveLocalMediaSlot,
 } from './utils/localMediaStore';
 import { AppDefaultArtwork } from './components/AppDefaultArtwork';
-import { FaqSection } from './components/FaqSection';
 import { PhotoCropEditorModal } from './components/PhotoCropEditorModal';
 import { ReviewSection } from './components/ReviewSection';
 
@@ -80,6 +80,39 @@ function toDateOrNull(value: unknown): Date | null {
     return (value as Timestamp).toDate();
   }
   return null;
+}
+
+function safeGetSessionStorage(key: string): string | null {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSetSessionStorage(key: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore restricted iframe or private-mode storage errors
+  }
+}
+
+function SectionDivider() {
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      className="relative w-full border-t border-slate-200"
+    >
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-center">
+        <span
+          aria-hidden="true"
+          className="-mt-[1.5px] block h-[2px] w-16 bg-[#146C43]/45"
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -141,38 +174,57 @@ export default function App() {
   }, [isAdmin]);
 
   // Subscribe to live visitor metrics singleton + detect/record visitor entry once per session
+  // Completely public (no login required) so every visitor sees real-time counts
   useEffect(() => {
     const metricsRef = doc(db, 'site_metrics', 'visitors');
+    let cancelled = false;
+
+    const applyMetricsSnapshot = (data: Record<string, unknown>) => {
+      if (cancelled) return;
+      setMetrics({
+        totalVisits: Number(data.totalVisits ?? 0),
+        sispermbgClicks: Number(data.sispermbgClicks ?? 0),
+        statusGiziClicks: Number(data.statusGiziClicks ?? 0),
+        sopSistakolClicks: Number(data.sopSistakolClicks ?? 0),
+        giziSeimbangClicks: Number(data.giziSeimbangClicks ?? 0),
+        updatedAt: toDateOrNull(data.updatedAt),
+      });
+      setMetricsLoaded(true);
+    };
+
+    // Immediate public read fallback for restricted networks / in-app browsers
+    void getDoc(metricsRef)
+      .then((snap) => {
+        if (snap.exists()) {
+          applyMetricsSnapshot(snap.data());
+        } else if (!cancelled) {
+          setMetricsLoaded(true);
+        }
+      })
+      .catch(() => {
+        // Real-time listener below handles reporting & updates
+      });
 
     const unsubMetrics = onSnapshot(
       metricsRef,
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data();
-          setMetrics({
-            totalVisits: Number(data.totalVisits ?? 0),
-            sispermbgClicks: Number(data.sispermbgClicks ?? 0),
-            statusGiziClicks: Number(data.statusGiziClicks ?? 0),
-            sopSistakolClicks: Number(data.sopSistakolClicks ?? 0),
-            giziSeimbangClicks: Number(data.giziSeimbangClicks ?? 0),
-            updatedAt: toDateOrNull(data.updatedAt),
-          });
+          applyMetricsSnapshot(snap.data());
+        } else if (!cancelled) {
+          setMetricsLoaded(true);
         }
-        setMetricsLoaded(true);
       },
       (err) => {
         handleFirestoreError(err, OperationType.GET, 'site_metrics/visitors', {
           rethrow: false,
         });
-        setMetricsLoaded(true);
+        if (!cancelled) setMetricsLoaded(true);
       }
     );
 
-    let cancelled = false;
-
     const recordVisit = async () => {
       try {
-        const alreadyCounted = window.sessionStorage.getItem(VISIT_SESSION_KEY);
+        const alreadyCounted = safeGetSessionStorage(VISIT_SESSION_KEY);
         if (alreadyCounted === '1') {
           if (!cancelled) setVisitRecorded(true);
           return;
@@ -208,7 +260,7 @@ export default function App() {
                 throw updateErr;
               }
             }
-            window.sessionStorage.setItem(VISIT_SESSION_KEY, '1');
+            safeSetSessionStorage(VISIT_SESSION_KEY, '1');
             return true;
           })().catch((err) => {
             visitRecordPromise = null;
@@ -569,7 +621,7 @@ export default function App() {
             />
           </a>
 
-          {/* Zone 2: 5 clean single-line navigation links */}
+          {/* Zone 2: 4 clean single-line navigation links */}
           <nav
             aria-label="Navigasi utama"
             className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600"
@@ -585,12 +637,6 @@ export default function App() {
               className="hover:text-[#0B2535] transition-colors whitespace-nowrap shrink-0"
             >
               Daftar Aplikasi
-            </a>
-            <a
-              href="#faq"
-              className="hover:text-[#0B2535] transition-colors whitespace-nowrap shrink-0"
-            >
-              FAQ
             </a>
             <a
               href="#ulasan"
@@ -632,7 +678,6 @@ export default function App() {
             {[
               { href: '#beranda', label: 'Beranda' },
               { href: '#aplikasi', label: 'Daftar Aplikasi' },
-              { href: '#faq', label: 'FAQ' },
               { href: '#ulasan', label: 'Rating & Ulasan' },
               { href: '#hubungi-kami', label: 'Hubungi Kami' },
             ].map((item) => (
@@ -671,7 +716,7 @@ export default function App() {
         {/* ===================================================================
             BAGIAN TENGAH — HERO SECTION DENGAN FOTO PRESISI (Gambar 1 & 3)
         =================================================================== */}
-        <section className="pt-10 pb-14 sm:pt-14 sm:pb-20 bg-white">
+        <section className="pt-10 pb-14 sm:pt-14 sm:pb-20 bg-white animate-fade-in">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-stretch">
               {/* Left Column: Precision Editable Portrait Frame (Gambar 1 & 3) */}
@@ -729,10 +774,7 @@ export default function App() {
                 <p className="text-base sm:text-lg text-slate-600 leading-relaxed mt-5 max-w-2xl">
                   Platform All-In-One{' '}
                   <strong className="font-semibold text-[#0B2535]">ODHEGIZI</strong>{' '}
-                  (Obrolan Digital Hitungan Edukasi GIZI) untuk Ahli Gizi dan pengelola layanan gizi. Akses aplikasi{' '}
-                  <strong className="font-semibold text-[#0B2535]">SISPERMBG</strong>,{' '}
-                  <strong className="font-semibold text-[#0B2535]">Status Gizi</strong>, dan{' '}
-                  <strong className="font-semibold text-[#0B2535]">DIGITAL SOP SISTAKOL BGN</strong> secara langsung dari satu pintu terintegrasi serta Hemat waktu.
+                  (Obrolan Digital Hitungan Edukasi GIZI) untuk Ahli Gizi dan pengelola layanan gizi.
                 </p>
 
                 <div className="mt-8 flex flex-wrap items-center gap-5">
@@ -763,79 +805,95 @@ export default function App() {
             </div>
 
             {/* ===============================================================
-                LIVE VISITOR DETECTION & METRICS STRIP (Full-Width Below Hero)
+                LIVE PUBLIC VISITOR & RATING METRICS STRIP (Visible to Everyone)
             =============================================================== */}
-            <div className="mt-12 sm:mt-16 pt-8 pb-8 border-y border-slate-200 grid grid-cols-2 lg:grid-cols-4 gap-y-6 gap-x-8">
-              <div>
-                <div className="text-xs font-medium text-slate-500 mb-1">
-                  Jumlah Pengunjung Terdeteksi
-                </div>
-                <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
-                  {metricsLoaded
-                    ? new Intl.NumberFormat('id-ID').format(metrics.totalVisits)
-                    : '—'}
-                </div>
-                <div className="text-xs text-[#146C43] mt-1 font-medium">
-                  {visitRecorded ? 'Kunjungan Anda tercatat otomatis' : 'Mendeteksi kunjungan...'}
-                </div>
+            <div
+              aria-label="Statistik publik GiziSync"
+              className="mt-12 sm:mt-16 border-y border-slate-200 py-7 sm:py-8 animate-fade-in fade-delay-100"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-5 mb-6 border-b border-slate-100 text-xs text-slate-500">
+                <span className="font-semibold text-[#0B2535]">
+                  Statistik Publik GiziSync
+                </span>
+                <span>Terbuka dan dapat dilihat langsung oleh seluruh pengunjung</span>
               </div>
 
-              <div>
-                <div className="text-xs font-medium text-slate-500 mb-1">
-                  Akses Daftar Aplikasi
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="py-4 sm:py-5 sm:pr-6 lg:py-0 lg:pr-6 border-b border-slate-200 sm:border-r lg:border-b-0">
+                  <div className="text-xs font-medium text-slate-500 mb-1">
+                    Jumlah Pengunjung Terdeteksi
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
+                    {metricsLoaded
+                      ? new Intl.NumberFormat('id-ID').format(metrics.totalVisits)
+                      : '—'}
+                  </div>
+                  <div className="text-xs text-[#146C43] mt-1 font-medium">
+                    {visitRecorded ? 'Kunjungan Anda tercatat otomatis' : 'Mendeteksi kunjungan...'}
+                  </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
-                  {metricsLoaded
-                    ? new Intl.NumberFormat('id-ID').format(totalAppClicks)
-                    : '—'}
-                </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Total klik pada {APPLICATION_CATALOG.length} tautan aplikasi
-                </div>
-              </div>
 
-              <div>
-                <div className="text-xs font-medium text-slate-500 mb-1">
-                  Rating Pengguna
+                <div className="py-4 sm:py-5 sm:pl-6 lg:py-0 lg:px-6 border-b border-slate-200 lg:border-b-0 lg:border-r">
+                  <div className="text-xs font-medium text-slate-500 mb-1">
+                    Akses Daftar Aplikasi
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
+                    {metricsLoaded
+                      ? new Intl.NumberFormat('id-ID').format(totalAppClicks)
+                      : '—'}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    Total klik pada {APPLICATION_CATALOG.length} tautan aplikasi
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
-                    {reviews.length > 0 ? averageRating.toFixed(1) : '—'}
-                  </span>
-                  {reviews.length > 0 && (
-                    <Star
-                      className="w-5 h-5 fill-[#D97706] text-[#D97706]"
-                      aria-hidden="true"
-                    />
-                  )}
-                </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  {reviews.length > 0 ? 'Skala penilaian 1.0 – 5.0' : 'Belum ada penilaian masuk'}
-                </div>
-              </div>
 
-              <div>
-                <div className="text-xs font-medium text-slate-500 mb-1">
-                  Komentar & Masukan Publik
+                <div className="py-4 sm:py-5 sm:pr-6 lg:py-0 lg:px-6 border-b border-slate-200 sm:border-b-0 sm:border-r">
+                  <div className="text-xs font-medium text-slate-500 mb-1">
+                    Rating Pengguna
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
+                      {reviews.length > 0 ? averageRating.toFixed(1) : '—'}
+                    </span>
+                    {reviews.length > 0 && (
+                      <Star
+                        className="w-5 h-5 fill-[#D97706] text-[#D97706]"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {reviews.length > 0 ? 'Skala penilaian 1.0 – 5.0' : 'Belum ada penilaian masuk'}
+                  </div>
                 </div>
-                <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
-                  {reviewsLoading
-                    ? '—'
-                    : new Intl.NumberFormat('id-ID').format(reviews.length)}
-                </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Tampil terbuka untuk seluruh pengunjung
+
+                <div className="py-4 sm:py-5 sm:pl-6 lg:py-0 lg:pl-6">
+                  <div className="text-xs font-medium text-slate-500 mb-1">
+                    Komentar & Masukan Publik
+                  </div>
+                  <div className="text-2xl sm:text-3xl font-bold font-mono tabular-nums text-[#0B2535]">
+                    {reviewsLoading
+                      ? '—'
+                      : new Intl.NumberFormat('id-ID').format(reviews.length)}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    Tampil terbuka untuk seluruh pengunjung
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
+        <SectionDivider />
+
         {/* ===================================================================
-            DAFTAR APLIKASI — SISPERMBG, STATUS GIZI, SOP SISTAKOL BGN
-            Masing-masing link dilengkapi Upload + Precision Crop Editor
+            DAFTAR APLIKASI — SISPERMBG, STATUS GIZI, SOP SISTAKOL BGN, GIZI SEIMBANG
         =================================================================== */}
-        <section id="aplikasi" className="py-16 sm:py-20 bg-white">
+        <section
+          id="aplikasi"
+          className="py-16 sm:py-20 bg-[#F7FAFC] animate-fade-in fade-delay-200"
+        >
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-12">
               <div className="max-w-2xl">
@@ -983,10 +1041,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* ===================================================================
-            SECTION PERTANYAAN SERING DIAJUKAN (FAQ)
-        =================================================================== */}
-        <FaqSection />
+        <SectionDivider />
 
         {/* ===================================================================
             SECTION RATING, KOMENTAR & MASUKAN PUBLIK
@@ -1002,12 +1057,14 @@ export default function App() {
         />
       </main>
 
+      <SectionDivider />
+
       {/* =====================================================================
           HEADER BAWAH / FOOTER — HUBUNGI KAMI & LOGO GIZISYNC (Gambar 2)
       ===================================================================== */}
       <footer
         id="hubungi-kami"
-        className="bg-white border-t border-slate-200 pt-16 pb-10"
+        className="bg-[#F7FAFC] pt-16 pb-10 animate-fade-in fade-delay-400"
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Top Centered Hubungi Kami Block mirroring Gambar 2 */}
@@ -1049,7 +1106,7 @@ export default function App() {
                 href="https://www.instagram.com/syukri_odhe?jplx=Ym85cDlvaW1tZjk2"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-[#F7FAFC] text-sm font-medium text-[#0B2535] hover:border-[#146C43] hover:bg-white hover:text-[#146C43] transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-[#0B2535] hover:border-[#146C43] hover:text-[#146C43] transition-colors whitespace-nowrap"
               >
                 <Instagram className="w-4 h-4 text-[#146C43] shrink-0" aria-hidden="true" />
                 <span>Instagram</span>
@@ -1061,7 +1118,7 @@ export default function App() {
                 href="http://tiktok.com/@syukri_odhe"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-[#F7FAFC] text-sm font-medium text-[#0B2535] hover:border-[#146C43] hover:bg-white hover:text-[#146C43] transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-[#0B2535] hover:border-[#146C43] hover:text-[#146C43] transition-colors whitespace-nowrap"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -1080,7 +1137,7 @@ export default function App() {
                 href="https://lynk.id/odhe98"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-[#F7FAFC] text-sm font-medium text-[#0B2535] hover:border-[#0284C7] hover:bg-white hover:text-[#0284C7] transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-[#0B2535] hover:border-[#0284C7] hover:text-[#0284C7] transition-colors whitespace-nowrap"
               >
                 <Link2 className="w-4 h-4 text-[#0284C7] shrink-0" aria-hidden="true" />
                 <span>Lynk.id</span>
@@ -1090,7 +1147,7 @@ export default function App() {
 
               <a
                 href="mailto:syukriyusuf82@gmail.com"
-                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-[#F7FAFC] text-sm font-medium text-[#0B2535] hover:border-[#146C43] hover:bg-white hover:text-[#146C43] transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-lg border border-slate-200 bg-white text-sm font-medium text-[#0B2535] hover:border-[#146C43] hover:text-[#146C43] transition-colors whitespace-nowrap"
               >
                 <Mail className="w-4 h-4 text-[#146C43] shrink-0" aria-hidden="true" />
                 <span>Email</span>
@@ -1115,11 +1172,6 @@ export default function App() {
                   <li>
                     <a href="#aplikasi" className="hover:text-[#0B2535] transition-colors">
                       Daftar Aplikasi
-                    </a>
-                  </li>
-                  <li>
-                    <a href="#faq" className="hover:text-[#0B2535] transition-colors">
-                      Pertanyaan Umum (FAQ)
                     </a>
                   </li>
                   <li>
